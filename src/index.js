@@ -2,18 +2,17 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import './styles.css';
+import { ThemeProvider } from '@mui/material/styles';
+import theme from './theme';
+import './index.css'; // or your main CSS
 
-// Grab the root element from your HTML
 const container = document.getElementById('root');
-
-// Create a root.
 const root = ReactDOM.createRoot(container);
-
-// Initial render: Render your app into the root.
 root.render(
   <React.StrictMode>
-    <App />
+    <ThemeProvider theme={theme}>
+      <App />
+    </ThemeProvider>
   </React.StrictMode>
 );
 
@@ -24,3 +23,4 @@ if ('serviceWorker' in navigator) {
     });
   });
 }
+

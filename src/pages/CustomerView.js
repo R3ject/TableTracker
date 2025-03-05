@@ -1,67 +1,206 @@
-// src/pages/CustomerView.js
-import React, { useEffect, useState } from 'react';
-import { db } from '../firebase/firebaseConfig';
-import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { toast } from 'react-toastify';
+import React, { useEffect, useState, useMemo, useCallback } from "react";
+import {
+  Container,
+  Box,
+  Typography,
+  Button,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  CircularProgress,
+} from "@mui/material";
+import { db, auth } from "../firebase/firebaseConfig";
+import {
+  collection,
+  onSnapshot,
+  doc,
+  updateDoc,
+  getDoc,
+  setDoc,
+} from "firebase/firestore";
+import { toast } from "react-toastify";
+
+const Filters = ({
+  filterCapacity,
+  setFilterCapacity,
+  filterStatus,
+  setFilterStatus,
+  sortOption,
+  setSortOption,
+}) => (
+  <Box sx={{ display: "flex", gap: 2, mb: 3 }}>
+    <FormControl variant="outlined" sx={{ minWidth: 120 }}>
+      <InputLabel id="filter-capacity-label">Capacity</InputLabel>
+      <Select
+        labelId="filter-capacity-label"
+        value={filterCapacity}
+        label="Capacity"
+        onChange={(e) => setFilterCapacity(e.target.value)}
+      >
+        <MenuItem value="All">All</MenuItem>
+        <MenuItem value="4">4</MenuItem>
+        <MenuItem value="6">6</MenuItem>
+        <MenuItem value="8">8</MenuItem>
+        <MenuItem value="10">10</MenuItem>
+      </Select>
+    </FormControl>
+
+    <FormControl variant="outlined" sx={{ minWidth: 120 }}>
+      <InputLabel id="filter-status-label">Status</InputLabel>
+      <Select
+        labelId="filter-status-label"
+        value={filterStatus}
+        label="Status"
+        onChange={(e) => setFilterStatus(e.target.value)}
+      >
+        <MenuItem value="All">All</MenuItem>
+        <MenuItem value="Available">Available</MenuItem>
+        <MenuItem value="Claimed">Claimed</MenuItem>
+        <MenuItem value="Occupied">Occupied</MenuItem>
+      </Select>
+    </FormControl>
+
+    <FormControl variant="outlined" sx={{ minWidth: 120 }}>
+      <InputLabel id="sort-option-label">Sort by</InputLabel>
+      <Select
+        labelId="sort-option-label"
+        value={sortOption}
+        label="Sort by"
+        onChange={(e) => setSortOption(e.target.value)}
+      >
+        <MenuItem value="name">Name</MenuItem>
+        <MenuItem value="capacity">Capacity</MenuItem>
+        <MenuItem value="waitTime">Wait Time</MenuItem>
+      </Select>
+    </FormControl>
+  </Box>
+);
 
 const CustomerView = () => {
   const [tables, setTables] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [filterCapacity, setFilterCapacity] = useState("All");
+  const [filterStatus, setFilterStatus] = useState("All");
   const [sortOption, setSortOption] = useState("name");
+
+  // Rate limiting constants
+  const nowMs = () => new Date().getTime();
+  const MAX_ATTEMPTS = 3;
+  const TIME_WINDOW = 60 * 60 * 1000; // 1 hour
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, "tables"),
       (snapshot) => {
-        const tableData = snapshot.docs.map(doc => ({
+        const tableData = snapshot.docs.map((doc) => ({
           id: doc.id,
-          ...doc.data()
+          ...doc.data(),
         }));
         setTables(tableData);
+        setLoading(false);
       },
       (error) => {
         toast.error("Error fetching tables");
         console.error(error);
+        setLoading(false);
       }
     );
     return () => unsubscribe();
   }, []);
 
-  // Function to compute the estimated wait time message
+  const getTableStartTime = (table) => {
+    if (table.status === "Occupied" && table.occupiedAt) {
+      return new Date(table.occupiedAt);
+    } else if (table.status === "Claimed" && table.claimedAt) {
+      return new Date(table.claimedAt);
+    }
+    return null;
+  };
+
   const getEstimatedWait = (table) => {
-    const averageOccupancy = 30; // average in minutes
-    let startTime;
-    if (table.status === "Occupied" && table.occupiedAt) {
-      startTime = new Date(table.occupiedAt);
-    } else if (table.status === "Claimed" && table.claimedAt) {
-      startTime = new Date(table.claimedAt);
-    } else {
-      return "";
-    }
+    const historicalAverage = 30;  
+    const startTime = getTableStartTime(table);
+    if (!startTime) return "";
     const now = new Date();
     const elapsedMinutes = (now - startTime) / 60000;
-    const estimatedWait = Math.max(averageOccupancy - elapsedMinutes, 0);
-    return estimatedWait > 0 ? `Free in ${Math.ceil(estimatedWait)} mins` : "Free now";
+    const remaining = historicalAverage - elapsedMinutes;
+    return remaining > 0
+      ? `Frees up in ${Math.ceil(remaining)} mins`
+      : "Free now";
   };
 
-  // Helper function to get wait time in minutes (for sorting)
-  const getWaitTimeInMinutes = (table) => {
+  const getWaitTimeInMinutes = useCallback((table) => {
+    if (table.status === "Available") return -1;
     const averageOccupancy = 30;
-    let startTime;
-    if (table.status === "Occupied" && table.occupiedAt) {
-      startTime = new Date(table.occupiedAt);
-    } else if (table.status === "Claimed" && table.claimedAt) {
-      startTime = new Date(table.claimedAt);
-    } else {
-      return 0;
-    }
-    const now = new Date();
-    const elapsedMinutes = (now - startTime) / 60000;
+    const startTime = getTableStartTime(table);
+    if (!startTime) return 0;
+    const elapsedMinutes = (new Date() - startTime) / 60000;
     return Math.max(averageOccupancy - elapsedMinutes, 0);
-  };
+  }, []);
 
-  // Geolocation check and claim table function (as before)
+  const filteredTables = useMemo(() => {
+    return tables.filter((table) => {
+      const capacityMatch =
+        filterCapacity === "All" ||
+        table.capacity === parseInt(filterCapacity, 10);
+      const statusMatch =
+        filterStatus === "All" || table.status === filterStatus;
+      return capacityMatch && statusMatch;
+    });
+  }, [tables, filterCapacity, filterStatus]);
+
+  const sortedTables = useMemo(() => {
+    return [...filteredTables].sort((a, b) => {
+      if (sortOption === "name") {
+        return a.name.localeCompare(b.name);
+      } else if (sortOption === "capacity") {
+        return a.capacity - b.capacity;
+      } else if (sortOption === "waitTime") {
+        return getWaitTimeInMinutes(a) - getWaitTimeInMinutes(b);
+      }
+      return 0;
+    });
+  }, [filteredTables, sortOption, getWaitTimeInMinutes]);
+
   const claimTable = async (table) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      toast.error("User not authenticated.");
+      return;
+    }
+    const userId = currentUser.uid;
+
+    // Rate limiting: track claim attempts in Firestore
+    const attemptsRef = doc(db, "claimAttempts", userId);
+    let attemptsData = { attempts: [] };
+    const attemptsSnap = await getDoc(attemptsRef);
+    if (attemptsSnap.exists()) {
+      attemptsData = attemptsSnap.data();
+    }
+    const currentTime = nowMs();
+    attemptsData.attempts = attemptsData.attempts.filter(
+      (ts) => currentTime - ts < TIME_WINDOW
+    );
+    if (attemptsData.attempts.length >= MAX_ATTEMPTS) {
+      toast.error(
+        "You have reached the maximum number of claim attempts for this hour."
+      );
+      return;
+    }
+    attemptsData.attempts.push(currentTime);
+    await setDoc(attemptsRef, attemptsData);
+
+    // If table is not available, add user to reservation queue and return.
+    if (table.status !== "Available") {
+      await updateDoc(doc(db, "tables", table.id), {
+        queue: table.queue ? [...table.queue, userId] : [userId],
+      });
+      toast.info("You've been added to the queue for this table");
+      return;
+    }
+
+    // Proceed with claim if table is available and user is on-site.
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
@@ -73,9 +212,24 @@ const CustomerView = () => {
           try {
             await updateDoc(doc(db, "tables", table.id), {
               status: "Claimed",
-              claimedAt: new Date().toISOString()
+              claimedAt: new Date().toISOString(),
+              lastUpdated: new Date().toISOString(),
             });
             toast.success(`You claimed ${table.name}!`);
+
+            // Update user stats: increment claim count in "userStats" collection
+            const userStatsRef = doc(db, "userStats", userId);
+            const userStatsSnap = await getDoc(userStatsRef);
+            let newCount = 1;
+            if (userStatsSnap.exists()) {
+              const data = userStatsSnap.data();
+              newCount = (data.claimCount || 0) + 1;
+            }
+            await setDoc(
+              userStatsRef,
+              { claimCount: newCount },
+              { merge: true }
+            );
           } catch (error) {
             toast.error("Error claiming table");
             console.error(error);
@@ -83,7 +237,8 @@ const CustomerView = () => {
         },
         () => {
           toast.error("Unable to retrieve your location");
-        }
+        },
+        { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
       );
     } else {
       toast.error("Geolocation not supported by your browser");
@@ -91,10 +246,10 @@ const CustomerView = () => {
   };
 
   const checkIfOnSite = (lat, lon) => {
-    const brewpubLat = 32.3487522;  // Replace with your brewpub's latitude
-    const brewpubLon = -95.3008154;  // Replace with your brewpub's longitude
+    const brewpubLat = 32.3487522;
+    const brewpubLon = -95.3008154;
     const toRad = (value) => (value * Math.PI) / 180;
-    const R = 6371; // km
+    const R = 6371;
     const dLat = toRad(brewpubLat - lat);
     const dLon = toRad(brewpubLon - lon);
     const a =
@@ -103,80 +258,85 @@ const CustomerView = () => {
       Math.sin(dLon / 2) ** 2;
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const distance = R * c;
-    const allowedDistance = 1; // within 1 km
-    return distance <= allowedDistance;
+    return distance <= 1;
   };
 
-  // Filtering: If filterCapacity is "All", show all tables. Otherwise, show only tables with matching capacity.
-  const filteredTables = tables.filter(table => {
-    if (filterCapacity === "All") return true;
-    // Ensure table.capacity is a number; adjust field name if needed.
-    return table.capacity === parseInt(filterCapacity, 10);
-  });
-
-  // Sorting: Make a copy of filteredTables and sort based on sortOption.
-  const sortedTables = [...filteredTables].sort((a, b) => {
-    if (sortOption === "name") {
-      return a.name.localeCompare(b.name);
-    } else if (sortOption === "capacity") {
-      return a.capacity - b.capacity;
-    } else if (sortOption === "waitTime") {
-      return getWaitTimeInMinutes(a) - getWaitTimeInMinutes(b);
-    } else {
-      return 0;
-    }
-  });
-
   return (
-    <div className="customer-view">
-      <h1>Brewpub Table Availability</h1>
-
-      {/* Filtering and Sorting Controls */}
-      <div className="controls" style={{ marginBottom: '20px' }}>
-        <label>
-          Filter by Capacity:{" "}
-          <select value={filterCapacity} onChange={(e) => setFilterCapacity(e.target.value)}>
-            <option value="All">All</option>
-            <option value="4">4</option>
-            <option value="6">6</option>
-            <option value="8">8</option>
-            <option value="10">10</option>
-            {/* Add more options as needed */}
-          </select>
-        </label>
-        <label style={{ marginLeft: "20px" }}>
-          Sort by:{" "}
-          <select value={sortOption} onChange={(e) => setSortOption(e.target.value)}>
-            <option value="name">Name</option>
-            <option value="capacity">Capacity</option>
-            <option value="waitTime">Wait Time</option>
-          </select>
-        </label>
-      </div>
-
-      <div className="table-list">
-        {sortedTables.map((table) => (
-            <div key={table.id} className="table-item">
-  <span>
-    {table.name} - Capacity: {table.capacity} - Status: {table.status}
-    {(table.status === "Occupied" || table.status === "Claimed") && (
-      <span>
-        {" - "}
-        {table.customWaitMessage ? table.customWaitMessage : getEstimatedWait(table)}
-      </span>
-    )}
-  </span>
-  {table.status === "Available" && (
-    <button onClick={() => claimTable(table)}>Claim Table</button>
-  )}
-  {table.status === "Claimed" && (
-    <span style={{ marginLeft: '10px' }}>Claimed</span>
-  )}
-</div>
-
-        ))}
-      </div>
-    </div>
+    <Container maxWidth="md">
+      <Box
+        sx={{
+          mt: 4,
+          p: 3,
+          border: "1px solid",
+          borderColor: "divider",
+          borderRadius: 2,
+          boxShadow: 2,
+          backgroundColor: "background.paper",
+        }}
+      >
+        <Typography variant="h4" gutterBottom>
+          Brewpub Table Availability
+        </Typography>
+        <Filters
+          filterCapacity={filterCapacity}
+          setFilterCapacity={setFilterCapacity}
+          filterStatus={filterStatus}
+          setFilterStatus={setFilterStatus}
+          sortOption={sortOption}
+          setSortOption={setSortOption}
+        />
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {loading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", mt: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : sortedTables.length > 0 ? (
+            sortedTables.map((table) => (
+              <Box
+                key={table.id}
+                sx={{
+                  p: 2,
+                  border: "1px solid",
+                  borderColor: "divider",
+                  borderRadius: 1,
+                  boxShadow: 1,
+                  backgroundColor: "background.paper",
+                }}
+              >
+                <Typography variant="h6">
+                  {table.name} - Capacity: {table.capacity} - Status: {table.status}
+                </Typography>
+                {(table.status === "Occupied" || table.status === "Claimed") && (
+                  <Typography variant="body2">
+                    {table.customWaitMessage
+                      ? table.customWaitMessage
+                      : getEstimatedWait(table)}
+                  </Typography>
+                )}
+                {table.status === "Available" && (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={() => claimTable(table)}
+                  >
+                    Claim Table
+                  </Button>
+                )}
+                {table.status === "Claimed" && (
+                  <Typography variant="body2" sx={{ ml: 2 }}>
+                    Claimed
+                  </Typography>
+                )}
+              </Box>
+            ))
+          ) : (
+            <Typography variant="body1" sx={{ mt: 2 }}>
+              No tables match your filters.
+            </Typography>
+          )}
+        </Box>
+      </Box>
+    </Container>
   );
 };
 
