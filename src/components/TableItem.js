@@ -10,7 +10,14 @@ import ChairIcon from "@mui/icons-material/Chair";
 import Chip from "@mui/material/Chip";
 import Fade from "@mui/material/Fade";
 
-const TableItem = ({ table, onToggle, onReorderQueue, isLoading, isStaff }) => {
+const TableItem = ({
+  table,
+  onToggle,
+  onReorderQueue,
+  onAddNote,
+  isLoading,
+  isStaff,
+}) => {
   if (!table) return null;
 
   // Format the "lastUpdated" timestamp if it exists
@@ -73,11 +80,29 @@ const TableItem = ({ table, onToggle, onReorderQueue, isLoading, isStaff }) => {
             "Claimed"
           )}
         </Button>
-        {/* If staff and the table has a reservation queue, show reorder button */}
-        {isStaff && table.queue && table.queue.length > 1 && onReorderQueue && (
-          <Button onClick={() => onReorderQueue(table)} size="small" color="secondary">
-            Reorder Queue
-          </Button>
+        {/* Staff-only actions */}
+        {isStaff && (
+          <>
+            {onReorderQueue && table.queue && table.queue.length > 1 && (
+              <Button onClick={() => onReorderQueue(table)} size="small" color="secondary">
+                Reorder Queue
+              </Button>
+            )}
+            {onAddNote && (
+              <Button
+                onClick={() => {
+                  const note = prompt("Enter note for table:", table.note || "");
+                  if (note !== null) {
+                    onAddNote(table, note);
+                  }
+                }}
+                size="small"
+                color="info"
+              >
+                {table.note ? "Edit Note" : "Add Note"}
+              </Button>
+            )}
+          </>
         )}
       </CardActions>
     </Card>

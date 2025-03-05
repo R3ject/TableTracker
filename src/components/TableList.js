@@ -93,6 +93,19 @@ const TableList = () => {
     }
   };
 
+  const updateTableNote = async (table, note) => {
+    try {
+      await updateDoc(doc(db, "tables", table.id), {
+        note,
+        lastUpdated: new Date().toISOString(),
+      });
+      toast.success(`Note updated for ${table.name}`);
+    } catch (error) {
+      toast.error("Error updating note.");
+      console.error(error);
+    }
+  };
+
   const haversineDistance = (lat1, lon1, lat2, lon2) => {
     const toRad = (value) => (value * Math.PI) / 180;
     const R = 6371; // Earth's radius in kilometers
@@ -122,6 +135,8 @@ const TableList = () => {
             table={table}
             onToggle={toggleStatus}
             onReorderQueue={isStaff ? reorderQueue : undefined}
+            onAddNote={isStaff ? updateTableNote : undefined}
+            isLoading={false}
             isStaff={isStaff}
           />
         </Grid>
