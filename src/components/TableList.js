@@ -1,9 +1,11 @@
+// src/components/TableList.js
 import React, { useEffect, useState } from "react";
 import { db, auth } from "../firebase/firebaseConfig";
 import { collection, onSnapshot, doc, updateDoc } from "firebase/firestore";
 import { toast } from "react-toastify";
 import TableItem from "./TableItem";
 import Grid from "@mui/material/Grid";
+import { isDemoMode, haversineDistance } from "../utils/DemoModeUtils";
 
 // Utility function for shuffling an array
 const shuffleArray = (array) => {
@@ -15,29 +17,8 @@ const shuffleArray = (array) => {
   return shuffled;
 };
 
-// Utility function for calculating distance using Haversine formula
-const haversineDistance = (lat1, lon1, lat2, lon2) => {
-  const toRad = (value) => (value * Math.PI) / 180;
-  const R = 6371; // Earth's radius in kilometers
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
-
-// Demo mode function: returns true if URL includes "demo=true"
-const isDemoMode = () => {
-  return window.location.search.includes("demo=true");
-};
-
 const TableList = () => {
   const [tables, setTables] = useState([]);
-
-  // Check if the current user is staff. For demo, we check if the email includes "staff"
   const currentUser = auth.currentUser;
   const isStaff = currentUser?.email?.toLowerCase().includes("staff");
 
@@ -50,7 +31,6 @@ const TableList = () => {
           ...doc.data(),
         }));
         setTables(tableData);
-        // Cache data in localStorage
         localStorage.setItem("tables", JSON.stringify(tableData));
       },
       (error) => {
@@ -90,7 +70,15 @@ const TableList = () => {
   const updateTableStatus = async (table) => {
     try {
       const newStatus = table.status === "Available" ? "Occupied" : "Available";
-      await updateDoc(doc(db, "tables", table.id), { status: newStatus });
+      const timestamp = new Date().toLocaleTimeString();
+      const newEntry = `${newStatus} at ${timestamp}`;
+      const updatedHistory = table.history ? [...table.history, newEntry] : [newEntry];
+      
+      await updateDoc(doc(db, "tables", table.id), {
+        status: newStatus,
+        lastUpdated: new Date().toISOString(),
+        history: updatedHistory
+      });
       toast.success(`Table ${table.name} is now ${newStatus}`);
     } catch (error) {
       toast.error("Error updating table status.");
@@ -132,8 +120,8 @@ const TableList = () => {
       console.log("Demo mode active - bypassing geolocation check.");
       return true;
     }
-    const brewpubLat = 32.3487522; // Actual brewery latitude
-    const brewpubLon = -95.3008154; // Actual brewery longitude
+    const brewpubLat = 32.3487522;
+    const brewpubLon = -95.3008154;
     const distance = haversineDistance(lat, lon, brewpubLat, brewpubLon);
     console.log("Calculated distance (km) in TableList:", distance);
     return distance <= 2;

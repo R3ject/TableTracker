@@ -5,29 +5,43 @@ import { toast } from "react-toastify";
 import { db } from "../firebase/firebaseConfig";
 
 const StaffNotifications = () => {
-  // Use a ref to store previous table data
   const prevTablesRef = useRef({});
+  const chime = useRef(null);
+  const initialLoad = useRef(true);
 
   useEffect(() => {
+    chime.current = new Audio(`${process.env.PUBLIC_URL}/chime.mp3`);
+    chime.current.volume = 0.5;
+    chime.current.load();
+
     const unsubscribe = onSnapshot(collection(db, "tables"), (snapshot) => {
       snapshot.docs.forEach((doc) => {
         const newData = doc.data();
         const prevData = prevTablesRef.current[doc.id];
 
-        // If the new status is "Claimed" and the previous status existed and was not "Claimed"
-        if (newData.status === "Claimed" && prevData && prevData.status !== "Claimed") {
-          toast.info(`Table ${newData.name} was claimed. Please review.`);
+        // Trigger chime if not on initial load and if status changed to "Claimed" or "Occupied"
+        if (!initialLoad.current) {
+          if (
+            (newData.status === "Claimed" || newData.status === "Occupied") &&
+            (!prevData || prevData.status !== newData.status)
+          ) {
+            toast.info(`Table ${newData.name} is now ${newData.status}. Please review.`);
+            if (chime.current) {
+              chime.current.play().catch((err) => console.error("Audio play error:", err));
+            }
+          }
         }
-
-        // Update the stored data for this table
         prevTablesRef.current[doc.id] = newData;
       });
+      if (initialLoad.current) {
+        initialLoad.current = false;
+      }
     });
 
     return () => unsubscribe();
   }, []);
 
-  return null; // This component doesn't render anything visible
+  return null;
 };
 
 export default StaffNotifications;

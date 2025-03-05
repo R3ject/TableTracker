@@ -8,6 +8,7 @@ import TableMap from "../components/TableMap";
 import AnalyticsDashboard from "../components/AnalyticsDashboard";
 import StaffNotifications from "../components/StaffNotifications";
 import ReportIssue from "../components/ReportIssue";
+import TestAudioButton from "../components/TestAudioButton";
 
 const Dashboard = () => {
   return (
@@ -38,6 +39,7 @@ const Dashboard = () => {
             md={4}
             sx={{ textAlign: { xs: "left", md: "right" } }}
           >
+            <TestAudioButton/>
             <Typography variant="body1">Staff Area</Typography>
           </Grid>
         </Grid>

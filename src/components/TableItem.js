@@ -1,4 +1,5 @@
-import React from "react";
+// src/components/TableItem.js
+import React, { useState } from "react";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import CardActions from "@mui/material/CardActions";
@@ -9,6 +10,7 @@ import TableRestaurantIcon from "@mui/icons-material/TableRestaurant";
 import ChairIcon from "@mui/icons-material/Chair";
 import Chip from "@mui/material/Chip";
 import Fade from "@mui/material/Fade";
+import Collapse from "@mui/material/Collapse";
 
 const TableItem = ({
   table,
@@ -18,9 +20,7 @@ const TableItem = ({
   isLoading,
   isStaff,
 }) => {
-  if (!table) return null;
-
-  // Format the "lastUpdated" timestamp if it exists
+  const [showHistory, setShowHistory] = useState(false);
   const lastUpdated = table.lastUpdated
     ? new Date(table.lastUpdated).toLocaleTimeString()
     : null;
@@ -40,10 +40,7 @@ const TableItem = ({
           {table.name}
         </Typography>
         <Fade in timeout={300}>
-          <Typography
-            color="text.secondary"
-            sx={{ display: "flex", alignItems: "center", mt: 1 }}
-          >
+          <Typography color="text.secondary" sx={{ display: "flex", alignItems: "center", mt: 1 }}>
             <ChairIcon sx={{ mr: 0.5 }} />
             {table.status}
           </Typography>
@@ -55,15 +52,10 @@ const TableItem = ({
           sx={{ mt: 1 }}
         />
         {lastUpdated && (
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ mt: 1, display: "block" }}
-          >
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
             Last Updated: {lastUpdated}
           </Typography>
         )}
-        {/* Display Table Note if available */}
         {table.note && (
           <Typography variant="body2" color="primary" sx={{ mt: 1 }}>
             Note: {table.note}
@@ -80,7 +72,6 @@ const TableItem = ({
             "Claimed"
           )}
         </Button>
-        {/* Staff-only actions */}
         {isStaff && (
           <>
             {onReorderQueue && table.queue && table.queue.length > 1 && (
@@ -102,9 +93,29 @@ const TableItem = ({
                 {table.note ? "Edit Note" : "Add Note"}
               </Button>
             )}
+            <Button
+              onClick={() => setShowHistory((prev) => !prev)}
+              size="small"
+              color="inherit"
+            >
+              {showHistory ? "Hide History" : "Show History"}
+            </Button>
           </>
         )}
       </CardActions>
+      <Collapse in={showHistory}>
+        <CardContent>
+          {table.history && table.history.length > 0 ? (
+            table.history.map((entry, index) => (
+              <Typography key={index} variant="body2">
+                {entry}
+              </Typography>
+            ))
+          ) : (
+            <Typography variant="body2">No history available.</Typography>
+          )}
+        </CardContent>
+      </Collapse>
     </Card>
   );
 };

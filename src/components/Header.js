@@ -11,6 +11,7 @@ import { auth } from '../firebase/firebaseConfig';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
+import DemoModeToggle from './DemoModeToggle';
 
 const Header = ({ toggleDarkMode, darkMode }) => {
   const [role, setRole] = useState(null);
@@ -51,7 +52,7 @@ const Header = ({ toggleDarkMode, darkMode }) => {
         >
           TableTracker
         </Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, auto)', gap: 1 }}>
           {role === 'staff' && (
             <>
               {/* Left column: Dashboard and Logout */}
@@ -73,6 +74,10 @@ const Header = ({ toggleDarkMode, darkMode }) => {
                     Logout
                   </Button>
                 )}
+              </Box>
+              {/* Middle column: Demo Mode Toggle */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <DemoModeToggle />
               </Box>
               {/* Right column: Manage Tables and Dark Mode toggle */}
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
@@ -102,6 +107,10 @@ const Header = ({ toggleDarkMode, darkMode }) => {
                 >
                   Customer
                 </Button>
+              </Box>
+              {/* Middle column: Demo Mode Toggle */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <DemoModeToggle />
               </Box>
               {/* Right column: Logout and Dark Mode toggle */}
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
