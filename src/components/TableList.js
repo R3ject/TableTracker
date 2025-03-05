@@ -15,6 +15,25 @@ const shuffleArray = (array) => {
   return shuffled;
 };
 
+// Utility function for calculating distance using Haversine formula
+const haversineDistance = (lat1, lon1, lat2, lon2) => {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+// Demo mode function: returns true if URL includes "demo=true"
+const isDemoMode = () => {
+  return window.location.search.includes("demo=true");
+};
+
 const TableList = () => {
   const [tables, setTables] = useState([]);
 
@@ -37,7 +56,6 @@ const TableList = () => {
       (error) => {
         toast.error("Failed to fetch table data.");
         console.error(error);
-        // Attempt to load cached data if available
         const cached = localStorage.getItem("tables");
         if (cached) setTables(JSON.parse(cached));
       }
@@ -49,15 +67,17 @@ const TableList = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
+          console.log("Geolocation position received:", position);
           const { latitude, longitude } = position.coords;
-          const onSite = checkIfOnSite(latitude, longitude);
-          if (!onSite) {
+          console.log("Simulated coordinates:", latitude, longitude);
+          if (!checkIfOnSite(latitude, longitude)) {
             toast.error("You must be on-site to update table status.");
             return;
           }
           await updateTableStatus(table);
         },
-        () => {
+        (error) => {
+          console.error("Geolocation error:", error);
           toast.error("Unable to verify your location.");
         },
         { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
@@ -106,25 +126,17 @@ const TableList = () => {
     }
   };
 
-  const haversineDistance = (lat1, lon1, lat2, lon2) => {
-    const toRad = (value) => (value * Math.PI) / 180;
-    const R = 6371; // Earth's radius in kilometers
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) ** 2;
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  };
-
   const checkIfOnSite = (lat, lon) => {
-    const brewpubLat = 32.3487522;  // Replace with your brewpub's latitude
-    const brewpubLon = -95.3008154; // Replace with your brewpub's longitude
+    console.log("Received coordinates in TableList:", lat, lon);
+    if (isDemoMode()) {
+      console.log("Demo mode active - bypassing geolocation check.");
+      return true;
+    }
+    const brewpubLat = 32.3487522; // Actual brewery latitude
+    const brewpubLon = -95.3008154; // Actual brewery longitude
     const distance = haversineDistance(lat, lon, brewpubLat, brewpubLon);
-    const allowedDistance = 2; // Allow within 2 km
-    return distance <= allowedDistance;
+    console.log("Calculated distance (km) in TableList:", distance);
+    return distance <= 2;
   };
 
   return (

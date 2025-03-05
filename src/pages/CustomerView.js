@@ -21,6 +21,7 @@ import {
 } from "firebase/firestore";
 import { toast } from "react-toastify";
 
+// Simple filters component
 const Filters = ({
   filterCapacity,
   setFilterCapacity,
@@ -45,7 +46,6 @@ const Filters = ({
         <MenuItem value="10">10</MenuItem>
       </Select>
     </FormControl>
-
     <FormControl variant="outlined" sx={{ minWidth: 120 }}>
       <InputLabel id="filter-status-label">Status</InputLabel>
       <Select
@@ -60,7 +60,6 @@ const Filters = ({
         <MenuItem value="Occupied">Occupied</MenuItem>
       </Select>
     </FormControl>
-
     <FormControl variant="outlined" sx={{ minWidth: 120 }}>
       <InputLabel id="sort-option-label">Sort by</InputLabel>
       <Select
@@ -76,6 +75,11 @@ const Filters = ({
     </FormControl>
   </Box>
 );
+
+// Demo mode: if URL contains "demo=true", bypass geolocation restrictions.
+const isDemoMode = () => {
+  return window.location.search.includes("demo=true");
+};
 
 const CustomerView = () => {
   const [tables, setTables] = useState([]);
@@ -119,7 +123,7 @@ const CustomerView = () => {
   };
 
   const getEstimatedWait = (table) => {
-    const historicalAverage = 30;  
+    const historicalAverage = 30;
     const startTime = getTableStartTime(table);
     if (!startTime) return "";
     const now = new Date();
@@ -204,7 +208,9 @@ const CustomerView = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
+          console.log("Geolocation position received:", position);
           const { latitude, longitude } = position.coords;
+          console.log("Simulated coordinates:", latitude, longitude);
           if (!checkIfOnSite(latitude, longitude)) {
             toast.error("You must be on-site to claim a table.");
             return;
@@ -216,7 +222,6 @@ const CustomerView = () => {
               lastUpdated: new Date().toISOString(),
             });
             toast.success(`You claimed ${table.name}!`);
-
             // Update user stats: increment claim count in "userStats" collection
             const userStatsRef = doc(db, "userStats", userId);
             const userStatsSnap = await getDoc(userStatsRef);
@@ -225,17 +230,14 @@ const CustomerView = () => {
               const data = userStatsSnap.data();
               newCount = (data.claimCount || 0) + 1;
             }
-            await setDoc(
-              userStatsRef,
-              { claimCount: newCount },
-              { merge: true }
-            );
+            await setDoc(userStatsRef, { claimCount: newCount }, { merge: true });
           } catch (error) {
             toast.error("Error claiming table");
             console.error(error);
           }
         },
-        () => {
+        (error) => {
+          console.error("Geolocation error:", error);
           toast.error("Unable to retrieve your location");
         },
         { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
@@ -245,20 +247,27 @@ const CustomerView = () => {
     }
   };
 
+  // Check if user is on-site; logs received coordinates and calculated distance.
   const checkIfOnSite = (lat, lon) => {
-    const brewpubLat = 32.3487522;
-    const brewpubLon = -95.3008154;
+    console.log("Received coordinates in checkIfOnSite:", lat, lon);
+    if (isDemoMode()) {
+      console.log("Demo mode active - bypassing geolocation check.");
+      return true;
+    }
+    const brewpubLat = 32.3487522; // Actual brewery latitude
+    const brewpubLon = -95.3008154; // Actual brewery longitude
     const toRad = (value) => (value * Math.PI) / 180;
-    const R = 6371;
+    const R = 6371; // Earth's radius in km
     const dLat = toRad(brewpubLat - lat);
     const dLon = toRad(brewpubLon - lon);
     const a =
-      Math.sin(dLat / 2) ** 2 +
+      Math.sin(dLon / 2) ** 2 +
       Math.cos(toRad(lat)) * Math.cos(toRad(brewpubLat)) *
-      Math.sin(dLon / 2) ** 2;
+      Math.sin(dLat / 2) ** 2;
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const distance = R * c;
-    return distance <= 1;
+    console.log("Calculated distance (km) in CustomerView:", distance);
+    return distance <= 2;
   };
 
   return (
@@ -308,9 +317,7 @@ const CustomerView = () => {
                 </Typography>
                 {(table.status === "Occupied" || table.status === "Claimed") && (
                   <Typography variant="body2">
-                    {table.customWaitMessage
-                      ? table.customWaitMessage
-                      : getEstimatedWait(table)}
+                    {table.customWaitMessage ? table.customWaitMessage : getEstimatedWait(table)}
                   </Typography>
                 )}
                 {table.status === "Available" && (
