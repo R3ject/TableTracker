@@ -18,8 +18,6 @@ const StaffNotifications = () => {
       snapshot.docs.forEach((doc) => {
         const newData = doc.data();
         const prevData = prevTablesRef.current[doc.id];
-
-        // Trigger chime if not on initial load and if status changed to "Claimed" or "Occupied"
         if (!initialLoad.current) {
           if (
             (newData.status === "Claimed" || newData.status === "Occupied") &&

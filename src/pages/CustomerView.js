@@ -1,3 +1,4 @@
+// src/pages/CustomerView.js
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import {
   Container,
@@ -21,7 +22,6 @@ import {
 } from "firebase/firestore";
 import { toast } from "react-toastify";
 
-// Simple filters component
 const Filters = ({
   filterCapacity,
   setFilterCapacity,
@@ -29,8 +29,26 @@ const Filters = ({
   setFilterStatus,
   sortOption,
   setSortOption,
+  selectedBrewpub,
+  setSelectedBrewpub,
+  brewpubOptions,
 }) => (
-  <Box sx={{ display: "flex", gap: 2, mb: 3 }}>
+  <Box sx={{ display: "flex", gap: 2, mb: 3, flexWrap: "wrap" }}>
+    <FormControl variant="outlined" sx={{ minWidth: 120 }}>
+      <InputLabel id="brewpub-label">Brewpub</InputLabel>
+      <Select
+        labelId="brewpub-label"
+        value={selectedBrewpub}
+        label="Brewpub"
+        onChange={(e) => setSelectedBrewpub(e.target.value)}
+      >
+        {brewpubOptions.map((brewpub) => (
+          <MenuItem key={brewpub.id} value={brewpub.id}>
+            {brewpub.name}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
     <FormControl variant="outlined" sx={{ minWidth: 120 }}>
       <InputLabel id="filter-capacity-label">Capacity</InputLabel>
       <Select
@@ -76,22 +94,50 @@ const Filters = ({
   </Box>
 );
 
-// Demo mode: if URL contains "demo=true", bypass geolocation restrictions.
-const isDemoMode = () => {
-  return window.location.search.includes("demo=true");
-};
-
 const CustomerView = () => {
   const [tables, setTables] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterCapacity, setFilterCapacity] = useState("All");
   const [filterStatus, setFilterStatus] = useState("All");
   const [sortOption, setSortOption] = useState("name");
+  const [selectedBrewpub, setSelectedBrewpub] = useState("brewpubA");
+  const [claimsLeft, setClaimsLeft] = useState(3);
+
+  // Define brewpub options (in a real app, these could be stored in Firestore)
+  const brewpubOptions = [
+    { id: "brewpubA", name: "Brewpub A", lat: 32.3487522, lon: -95.3008154 },
+    { id: "brewpubB", name: "Brewpub B", lat: 40.7128, lon: -74.0060 },
+    { id: "brewpubC", name: "Brewpub C", lat: 37.7749, lon: -122.4194 },
+  ];
 
   // Rate limiting constants
   const nowMs = () => new Date().getTime();
   const MAX_ATTEMPTS = 3;
   const TIME_WINDOW = 60 * 60 * 1000; // 1 hour
+
+  // Wrap updateClaimsLeft in useCallback and include TIME_WINDOW in dependencies
+  const updateClaimsLeft = useCallback(async (userId) => {
+    try {
+      const attemptsRef = doc(db, "claimAttempts", userId);
+      const attemptsSnap = await getDoc(attemptsRef);
+      let attempts = [];
+      if (attemptsSnap.exists()) {
+        attempts = attemptsSnap.data().attempts || [];
+      }
+      const currentTime = nowMs();
+      attempts = attempts.filter((ts) => currentTime - ts < TIME_WINDOW);
+      setClaimsLeft(MAX_ATTEMPTS - attempts.length);
+    } catch (error) {
+      console.error("Error fetching claim attempts:", error);
+    }
+  }, [TIME_WINDOW]);
+
+  const currentUser = auth.currentUser;
+  useEffect(() => {
+    if (currentUser) {
+      updateClaimsLeft(currentUser.uid);
+    }
+  }, [currentUser, updateClaimsLeft]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -168,14 +214,13 @@ const CustomerView = () => {
   }, [filteredTables, sortOption, getWaitTimeInMinutes]);
 
   const claimTable = async (table) => {
-    const currentUser = auth.currentUser;
     if (!currentUser) {
       toast.error("User not authenticated.");
       return;
     }
     const userId = currentUser.uid;
+    await updateClaimsLeft(userId);
 
-    // Rate limiting: track claim attempts in Firestore
     const attemptsRef = doc(db, "claimAttempts", userId);
     let attemptsData = { attempts: [] };
     const attemptsSnap = await getDoc(attemptsRef);
@@ -187,15 +232,13 @@ const CustomerView = () => {
       (ts) => currentTime - ts < TIME_WINDOW
     );
     if (attemptsData.attempts.length >= MAX_ATTEMPTS) {
-      toast.error(
-        "You have reached the maximum number of claim attempts for this hour."
-      );
+      toast.error("You have reached the maximum number of claim attempts for this hour.");
       return;
     }
     attemptsData.attempts.push(currentTime);
     await setDoc(attemptsRef, attemptsData);
+    await updateClaimsLeft(userId);
 
-    // If table is not available, add user to reservation queue and return.
     if (table.status !== "Available") {
       await updateDoc(doc(db, "tables", table.id), {
         queue: table.queue ? [...table.queue, userId] : [userId],
@@ -204,14 +247,19 @@ const CustomerView = () => {
       return;
     }
 
-    // Proceed with claim if table is available and user is on-site.
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
-          console.log("Geolocation position received:", position);
           const { latitude, longitude } = position.coords;
-          console.log("Simulated coordinates:", latitude, longitude);
-          if (!checkIfOnSite(latitude, longitude)) {
+          const selectedBrewpubData = brewpubOptions.find(
+            (brewpub) => brewpub.id === selectedBrewpub
+          );
+          if (!selectedBrewpubData) {
+            toast.error("Invalid brewpub selected.");
+            return;
+          }
+          const { lat: siteLat, lon: siteLon } = selectedBrewpubData;
+          if (!checkIfOnSite(latitude, longitude, siteLat, siteLon)) {
             toast.error("You must be on-site to claim a table.");
             return;
           }
@@ -222,7 +270,6 @@ const CustomerView = () => {
               lastUpdated: new Date().toISOString(),
             });
             toast.success(`You claimed ${table.name}!`);
-            // Update user stats: increment claim count in "userStats" collection
             const userStatsRef = doc(db, "userStats", userId);
             const userStatsSnap = await getDoc(userStatsRef);
             let newCount = 1;
@@ -236,8 +283,7 @@ const CustomerView = () => {
             console.error(error);
           }
         },
-        (error) => {
-          console.error("Geolocation error:", error);
+        () => {
           toast.error("Unable to retrieve your location");
         },
         { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
@@ -247,45 +293,28 @@ const CustomerView = () => {
     }
   };
 
-  // Check if user is on-site; logs received coordinates and calculated distance.
-  const checkIfOnSite = (lat, lon) => {
-    console.log("Received coordinates in checkIfOnSite:", lat, lon);
-    if (isDemoMode()) {
-      console.log("Demo mode active - bypassing geolocation check.");
+  const checkIfOnSite = (lat, lon, siteLat, siteLon, threshold = 2) => {
+    if (window.location.search.includes("demo=true") || localStorage.getItem("demoMode") === "true") {
       return true;
     }
-    const brewpubLat = 32.3487522; // Actual brewery latitude
-    const brewpubLon = -95.3008154; // Actual brewery longitude
     const toRad = (value) => (value * Math.PI) / 180;
-    const R = 6371; // Earth's radius in km
-    const dLat = toRad(brewpubLat - lat);
-    const dLon = toRad(brewpubLon - lon);
+    const R = 6371;
+    const dLat = toRad(siteLat - lat);
+    const dLon = toRad(siteLon - lon);
     const a =
-      Math.sin(dLon / 2) ** 2 +
-      Math.cos(toRad(lat)) * Math.cos(toRad(brewpubLat)) *
-      Math.sin(dLat / 2) ** 2;
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat)) * Math.cos(toRad(siteLat)) *
+      Math.sin(dLon / 2) ** 2;
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const distance = R * c;
-    console.log("Calculated distance (km) in CustomerView:", distance);
-    return distance <= 2;
+    return distance <= threshold;
   };
 
   return (
     <Container maxWidth="md">
-      <Box
-        sx={{
-          mt: 4,
-          p: 3,
-          border: "1px solid",
-          borderColor: "divider",
-          borderRadius: 2,
-          boxShadow: 2,
-          backgroundColor: "background.paper",
-        }}
-      >
-        <Typography variant="h4" gutterBottom>
-          Brewpub Table Availability
-        </Typography>
+      <Box sx={{ mt: 4, p: 3, border: "1px solid", borderColor: "divider", borderRadius: 2, boxShadow: 2, backgroundColor: "background.paper" }}>
+        <Typography variant="h4" gutterBottom>Brewpub Table Availability</Typography>
+        <Typography variant="body1" gutterBottom>Claims left: {claimsLeft}/{MAX_ATTEMPTS}</Typography>
         <Filters
           filterCapacity={filterCapacity}
           setFilterCapacity={setFilterCapacity}
@@ -293,6 +322,9 @@ const CustomerView = () => {
           setFilterStatus={setFilterStatus}
           sortOption={sortOption}
           setSortOption={setSortOption}
+          selectedBrewpub={selectedBrewpub}
+          setSelectedBrewpub={setSelectedBrewpub}
+          brewpubOptions={brewpubOptions}
         />
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {loading ? (
@@ -301,45 +333,23 @@ const CustomerView = () => {
             </Box>
           ) : sortedTables.length > 0 ? (
             sortedTables.map((table) => (
-              <Box
-                key={table.id}
-                sx={{
-                  p: 2,
-                  border: "1px solid",
-                  borderColor: "divider",
-                  borderRadius: 1,
-                  boxShadow: 1,
-                  backgroundColor: "background.paper",
-                }}
-              >
-                <Typography variant="h6">
-                  {table.name} - Capacity: {table.capacity} - Status: {table.status}
-                </Typography>
+              <Box key={table.id} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 1, boxShadow: 1, backgroundColor: "background.paper" }}>
+                <Typography variant="h6">{table.name} - Capacity: {table.capacity} - Status: {table.status}</Typography>
                 {(table.status === "Occupied" || table.status === "Claimed") && (
                   <Typography variant="body2">
                     {table.customWaitMessage ? table.customWaitMessage : getEstimatedWait(table)}
                   </Typography>
                 )}
                 {table.status === "Available" && (
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={() => claimTable(table)}
-                  >
-                    Claim Table
-                  </Button>
+                  <Button variant="contained" color="primary" onClick={() => claimTable(table)}>Claim Table</Button>
                 )}
                 {table.status === "Claimed" && (
-                  <Typography variant="body2" sx={{ ml: 2 }}>
-                    Claimed
-                  </Typography>
+                  <Typography variant="body2" sx={{ ml: 2 }}>Claimed</Typography>
                 )}
               </Box>
             ))
           ) : (
-            <Typography variant="body1" sx={{ mt: 2 }}>
-              No tables match your filters.
-            </Typography>
+            <Typography variant="body1" sx={{ mt: 2 }}>No tables match your filters.</Typography>
           )}
         </Box>
       </Box>
